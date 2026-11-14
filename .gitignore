@@ -1,0 +1,36 @@
+# Environment files
+.env
+.env.*
+!.env.example
+**/backend/.env
+**/backend/.env.*
+!**/backend/.env.example
+**/frontend/.env*
+!**/frontend/.env.example
+
+# Backup & temporary files
+*.bak
+*.bak-*
+*.backup
+*.tmp
+*.swp
+
+# Dependencies & build directories
+node_modules/
+vendor/
+.next/
+out/
+build/
+
+# SQLite databases
+*.sqlite
+*.sqlite-journal
+*.sqlite-shm
+*.sqlite-wal
+
+# OS & Editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log

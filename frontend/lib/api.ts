@@ -13,11 +13,50 @@ export const API_URL = (
 
 type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
+export type UserRole = "admin" | "petugas";
+
+export type UserPermissions = {
+  can_manage_users: boolean;
+  can_manage_work_types: boolean;
+  can_create_transactions: boolean;
+  can_view_transactions: boolean;
+  can_manage_transactions: boolean;
+  can_export_transactions: boolean;
+  can_view_audit_logs: boolean;
+};
+
+export type AuthUser = {
+  id: number;
+  name: string;
+  username: string;
+  email: string | null;
+  role: UserRole;
+  role_label: string;
+  is_active: boolean;
+  permissions: UserPermissions;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export type LoginPayload = {
+  /** Username atau alamat email (FR-001) */
+  login: string;
+  password: string;
+  remember?: boolean;
+};
+
+export type LoginResponse = {
+  message: string;
+  user: AuthUser;
+};
+
 export class ApiError extends Error {
   readonly status: number;
   readonly data: unknown;
   /** Error validasi Laravel (422): { field: [pesan, ...] } */
   readonly errors?: Record<string, string[]>;
+  /** Detik tunggu jika terkena rate limit (429) */
+  readonly retryAfter?: number;
 
   constructor(message: string, status: number, data: unknown = null) {
     super(message);
@@ -27,10 +66,26 @@ export class ApiError extends Error {
     if (status === 422 && data && typeof data === "object" && "errors" in data) {
       this.errors = (data as { errors: Record<string, string[]> }).errors;
     }
+    if (
+      status === 429 &&
+      data &&
+      typeof data === "object" &&
+      "retry_after" in data
+    ) {
+      this.retryAfter = Number(
+        (data as { retry_after: unknown }).retry_after,
+      );
+    }
   }
 
   get isUnauthenticated() {
     return this.status === 401;
+  }
+  get isForbidden() {
+    return this.status === 403;
+  }
+  get isTooManyRequests() {
+    return this.status === 429;
   }
   get isNetworkError() {
     return this.status === 0;
@@ -137,3 +192,27 @@ export type HealthResponse = {
 };
 
 export const getHealth = () => api.get<HealthResponse>("/api/health");
+
+/**
+ * Login SPA menggunakan username atau email + password (FR-001).
+ * Otomatis meminta CSRF cookie terlebih dahulu sebelum mengirim kredensial.
+ */
+export async function login(payload: LoginPayload): Promise<LoginResponse> {
+  await ensureCsrfCookie();
+  return api.post<LoginResponse>("/api/auth/login", payload);
+}
+
+/**
+ * Ambil profil pengguna yang sedang login beserta role & permissions.
+ */
+export async function getCurrentUser(): Promise<AuthUser> {
+  const res = await api.get<{ user: AuthUser }>("/api/auth/me");
+  return res.user;
+}
+
+/**
+ * Logout dan akhiri sesi pengguna.
+ */
+export async function logout(): Promise<{ message: string }> {
+  return api.post<{ message: string }>("/api/auth/logout");
+}
