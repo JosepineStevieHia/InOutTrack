@@ -1,143 +1,209 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { DashboardShell } from "@/components/layout/DashboardShell";
+import { TransactionDetailModal } from "@/components/transactions/TransactionDetailModal";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
-import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { DataTable, type TableColumn } from "@/components/ui/DataTable";
 import { SelectInput, TextInput } from "@/components/ui/FormField";
 import {
   AuditIcon,
   ExportIcon,
+  EyeIcon,
   HistoryIcon,
   InboundIcon,
   OutboundIcon,
+  RefreshIcon,
   SearchIcon,
   UsersIcon,
+  WorkTypeIcon,
 } from "@/components/ui/Icons";
-import { Modal } from "@/components/ui/Modal";
 import { SummaryCard } from "@/components/ui/SummaryCard";
-import { useToast } from "@/components/ui/ToastProvider";
-
-type FoundationPreviewRow = {
-  id: string;
-  modul: string;
-  akses: string;
-  status: "Siap" | "Tahap Berikutnya";
-};
-
-const FOUNDATION_MODULES: FoundationPreviewRow[] = [
-  {
-    id: "MOD-1",
-    modul: "Autentikasi & Sesi Sanctum SPA",
-    akses: "Admin & Petugas",
-    status: "Siap",
-  },
-  {
-    id: "MOD-2",
-    modul: "Pencatatan Barang Masuk & Keluar",
-    akses: "Admin & Petugas",
-    status: "Tahap Berikutnya",
-  },
-  {
-    id: "MOD-3",
-    modul: "Manajemen Akun & Jenis Pekerjaan",
-    akses: "Khusus Admin",
-    status: "Tahap Berikutnya",
-  },
-  {
-    id: "MOD-4",
-    modul: "Ekspor PDF/Excel & Log Audit",
-    akses: "Khusus Admin",
-    status: "Tahap Berikutnya",
-  },
-];
+import {
+  ApiError,
+  getDashboardSummary,
+  type TransactionListSummary,
+  type TransactionRecord,
+} from "@/lib/api";
+import {
+  formatTransactionDate,
+  formatTransactionTime,
+  getCounterpartyInfo,
+  getOfficerDisplayName,
+  getPeriodDateRange,
+  type PeriodPreset,
+} from "@/lib/transaction-utils";
 
 export default function DashboardPage() {
   const { user, isAdmin } = useAuth();
-  const toast = useToast();
 
-  // State UI untuk menguji komponen foundation (loading, empty state, modal, konfirmasi, form)
-  const [tableLoading, setTableLoading] = useState(false);
-  const [showEmptyDemo, setShowEmptyDemo] = useState(false);
-  const [searchFilter, setSearchFilter] = useState("");
-  const [roleFilter, setRoleFilter] = useState("all");
-  const [previewModalOpen, setPreviewModalOpen] = useState(false);
-  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [periodPreset, setPeriodPreset] = useState<PeriodPreset>("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
 
-  if (!user) return null;
+  const [summary, setSummary] = useState<TransactionListSummary | null>(null);
+  const [periodLabel, setPeriodLabel] = useState("Semua Periode");
+  const [recentTransactions, setRecentTransactions] = useState<
+    TransactionRecord[]
+  >([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [detailTarget, setDetailTarget] = useState<TransactionRecord | null>(
+    null,
+  );
 
-  const filteredRows = showEmptyDemo
-    ? []
-    : FOUNDATION_MODULES.filter((row) => {
-        const matchSearch = row.modul
-          .toLowerCase()
-          .includes(searchFilter.toLowerCase());
-        const matchRole =
-          roleFilter === "all" ||
-          (roleFilter === "admin" && row.akses.includes("Khusus Admin")) ||
-          (roleFilter === "all_roles" && row.akses === "Admin & Petugas");
-        return matchSearch && matchRole;
+  const dateRangeWarning =
+    dateFrom && dateTo && dateFrom > dateTo
+      ? "Tanggal awal lebih besar daripada tanggal akhir."
+      : null;
+
+  useEffect(() => {
+    if (!user) return;
+    let active = true;
+
+    Promise.resolve()
+      .then(() => {
+        if (!active) return null;
+        setIsLoading(true);
+        setFetchError(null);
+        return getDashboardSummary({
+          date_from: dateFrom,
+          date_to: dateTo,
+        });
+      })
+      .then((res) => {
+        if (!active || !res) return;
+        setSummary(res.summary);
+        setPeriodLabel(res.period.label);
+        setRecentTransactions(res.recent_transactions);
+      })
+      .catch((err) => {
+        if (!active) return;
+        setFetchError(
+          err instanceof ApiError
+            ? err.message
+            : "Gagal memuat ringkasan dashboard.",
+        );
+      })
+      .finally(() => {
+        if (active) setIsLoading(false);
       });
 
-  const columns: TableColumn<FoundationPreviewRow>[] = [
-    {
-      key: "id",
-      header: "Kode",
-      render: (row) => (
-        <span className="font-mono text-xs font-semibold text-slate-600">
-          {row.id}
-        </span>
-      ),
-    },
-    {
-      key: "modul",
-      header: "Komponen / Modul",
-      render: (row) => (
-        <span className="font-medium text-slate-900">{row.modul}</span>
-      ),
-    },
-    {
-      key: "akses",
-      header: "Hak Akses (PRD)",
-      render: (row) => (
-        <span
-          className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-            row.akses === "Khusus Admin"
-              ? "bg-indigo-50 text-indigo-700"
-              : "bg-slate-100 text-slate-700"
-          }`}
-        >
-          {row.akses}
-        </span>
-      ),
-    },
-    {
-      key: "status",
-      header: "Status",
-      render: (row) => (
-        <span
-          className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-            row.status === "Siap"
-              ? "bg-emerald-50 text-emerald-700"
-              : "bg-amber-50 text-amber-800"
-          }`}
-        >
-          {row.status}
-        </span>
-      ),
-    },
-  ];
+    return () => {
+      active = false;
+    };
+  }, [user, dateFrom, dateTo, reloadKey]);
+
+  const handlePresetChange = (value: string) => {
+    const preset = value as PeriodPreset;
+    setPeriodPreset(preset);
+    if (preset === "custom") return;
+
+    const range = getPeriodDateRange(preset);
+    setDateFrom(range.dateFrom);
+    setDateTo(range.dateTo);
+  };
+
+  const handleResetPeriod = () => {
+    setPeriodPreset("all");
+    setDateFrom("");
+    setDateTo("");
+  };
+
+  const columns: TableColumn<TransactionRecord>[] = useMemo(
+    () => [
+      {
+        key: "type",
+        header: "Jenis",
+        render: (row) =>
+          row.type === "MASUK" ? (
+            <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-semibold text-emerald-800">
+              <InboundIcon className="h-3.5 w-3.5 shrink-0" />
+              Barang Masuk
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800">
+              <OutboundIcon className="h-3.5 w-3.5 shrink-0" />
+              Barang Keluar
+            </span>
+          ),
+      },
+      {
+        key: "datetime",
+        header: "Tanggal & Waktu",
+        render: (row) => (
+          <div className="whitespace-nowrap">
+            <p className="font-medium text-slate-900">
+              {formatTransactionDate(row.transaction_datetime)}
+            </p>
+            <p className="text-xs text-slate-500">
+              {formatTransactionTime(row.transaction_datetime)}
+            </p>
+          </div>
+        ),
+      },
+      {
+        key: "item",
+        header: "Nama Barang & Jumlah",
+        render: (row) => (
+          <div>
+            <p className="font-semibold text-slate-900">{row.item_name}</p>
+            <p className="text-xs text-slate-500">
+              {row.quantity_formatted} {row.unit} •{" "}
+              {row.work_type?.name ?? "-"}
+            </p>
+          </div>
+        ),
+      },
+      {
+        key: "party",
+        header: "Asal / Tujuan",
+        render: (row) => {
+          const info = getCounterpartyInfo(row);
+          return (
+            <div>
+              <p className="font-medium text-slate-800">{info.location}</p>
+              <p className="text-xs text-slate-500">
+                Petugas: {getOfficerDisplayName(row)}
+              </p>
+            </div>
+          );
+        },
+      },
+      {
+        key: "action",
+        header: "Detail",
+        align: "right",
+        render: (row) => (
+          <div onClick={(e) => e.stopPropagation()}>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setDetailTarget(row)}
+              leftIcon={<EyeIcon className="h-3.5 w-3.5" />}
+            >
+              Detail
+            </Button>
+          </div>
+        ),
+      },
+    ],
+    [],
+  );
+
+  if (!user) return null;
 
   return (
     <DashboardShell
       pageTitle="Dashboard"
       pageSubtitle={
         isAdmin
-          ? "Ringkasan operasional, kontrol akses, dan pengelolaan administrasi InOutTrack"
+          ? "Ringkasan operasional, kontrol akses, dan ekspor laporan InOutTrack"
           : "Ringkasan pencatatan operasional harian untuk Petugas Store & Security"
       }
     >
@@ -150,56 +216,158 @@ export default function DashboardPage() {
           Anda masuk sebagai{" "}
           <strong className="font-semibold">{user.role_label}</strong>.{" "}
           {isAdmin
-            ? "Menu administrasi (Ekspor PDF/Excel, Jenis Pekerjaan, Manajemen Akun, dan Log Audit) tersedia pada navigasi Anda."
-            : "Anda memiliki akses operasional untuk pencatatan Barang Masuk, Barang Keluar, dan penelusuran Riwayat Transaksi."}
+            ? "Anda dapat memantau ringkasan periode, mengelola akun & jenis pekerjaan, serta mengekspor riwayat ke PDF dan Excel."
+            : "Anda dapat mencatat Barang Masuk, Barang Keluar, dan memantau riwayat pencatatan sesuai periode."}
         </Alert>
 
-        {/* Kartu Ringkasan (Summary Cards) */}
+        {/* Filter Periode Dashboard (FR-009 & Bagian 8.5) */}
+        <section
+          aria-label="Filter Periode Dashboard"
+          className="rounded-2xl border border-slate-200 bg-white p-5 shadow-2xs"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-900">
+                Filter Periode Ringkasan
+              </h2>
+              <p className="text-xs text-slate-500">
+                Periode aktif:{" "}
+                <span
+                  className="font-semibold text-blue-700"
+                  data-testid="dashboard-period-label"
+                >
+                  {periodLabel}
+                </span>
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setReloadKey((prev) => prev + 1)}
+                leftIcon={<RefreshIcon className="h-4 w-4" />}
+              >
+                Muat Ulang
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleResetPeriod}
+                disabled={periodPreset === "all" && !dateFrom && !dateTo}
+                data-testid="dashboard-reset-period-button"
+              >
+                Reset Periode
+              </Button>
+            </div>
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <SelectInput
+              label="Pilih Periode"
+              value={periodPreset}
+              onChange={(e) => handlePresetChange(e.target.value)}
+              options={[
+                { value: "all", label: "Semua Waktu" },
+                { value: "today", label: "Hari Ini" },
+                { value: "7d", label: "7 Hari Terakhir" },
+                { value: "30d", label: "30 Hari Terakhir" },
+                { value: "this_month", label: "Bulan Ini" },
+                { value: "custom", label: "Rentang Tanggal Kustom" },
+              ]}
+              data-testid="dashboard-period-preset"
+            />
+
+            <TextInput
+              type="date"
+              label="Dari Tanggal"
+              value={dateFrom}
+              onChange={(e) => {
+                setPeriodPreset("custom");
+                setDateFrom(e.target.value);
+              }}
+              data-testid="dashboard-date-from"
+            />
+
+            <TextInput
+              type="date"
+              label="Sampai Tanggal"
+              value={dateTo}
+              onChange={(e) => {
+                setPeriodPreset("custom");
+                setDateTo(e.target.value);
+              }}
+              data-testid="dashboard-date-to"
+            />
+          </div>
+
+          {dateRangeWarning && (
+            <div className="mt-3">
+              <Alert variant="warning" title="Periksa Rentang Tanggal">
+                {dateRangeWarning}
+              </Alert>
+            </div>
+          )}
+        </section>
+
+        {fetchError && (
+          <Alert variant="error" title="Gagal Memuat Ringkasan">
+            {fetchError}
+          </Alert>
+        )}
+
+        {/* Kartu Ringkasan (Total Transaksi, Barang Masuk, Barang Keluar) */}
         <section aria-labelledby="ringkasan-heading" className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2
               id="ringkasan-heading"
               className="text-sm font-semibold uppercase tracking-wider text-slate-500"
             >
-              Ringkasan Pencatatan (Fondasi UI)
+              Ringkasan Transaksi
             </h2>
-            <span className="text-xs text-slate-500">
-              Data transaksi aktual akan terhubung pada modul transaksi
-            </span>
+            <span className="text-xs text-slate-500">{periodLabel}</span>
           </div>
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            <SummaryCard
-              title="Total Pencatatan"
-              value="0"
-              badgeText="Periode Aktif"
-              subtitle="Gabungan transaksi masuk & keluar tercatat"
-              icon={<HistoryIcon className="h-5 w-5" />}
-              variant="default"
-              isLoading={tableLoading}
-            />
-            <SummaryCard
-              title="Barang Masuk"
-              value="0"
-              badgeText="MASUK"
-              subtitle="Penerimaan barang dari vendor/pengantar"
-              icon={<InboundIcon className="h-5 w-5" />}
-              variant="inbound"
-              isLoading={tableLoading}
-            />
-            <SummaryCard
-              title="Barang Keluar"
-              value="0"
-              badgeText="KELUAR"
-              subtitle="Pengeluaran barang untuk unit kerja/tujuan"
-              icon={<OutboundIcon className="h-5 w-5" />}
-              variant="outbound"
-              isLoading={tableLoading}
-            />
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <div data-testid="summary-card-total">
+              <SummaryCard
+                title="Total Transaksi"
+                value={summary?.total ?? 0}
+                badgeText={periodLabel}
+                subtitle="Gabungan barang masuk & keluar pada periode"
+                icon={<HistoryIcon className="h-5 w-5" />}
+                variant="default"
+                isLoading={isLoading && !summary}
+              />
+            </div>
+            <div data-testid="summary-card-masuk">
+              <SummaryCard
+                title="Total Barang Masuk"
+                value={summary?.masuk ?? 0}
+                badgeText="MASUK"
+                subtitle="Penerimaan barang tercatat pada periode"
+                icon={<InboundIcon className="h-5 w-5" />}
+                variant="inbound"
+                isLoading={isLoading && !summary}
+              />
+            </div>
+            <div data-testid="summary-card-keluar">
+              <SummaryCard
+                title="Total Barang Keluar"
+                value={summary?.keluar ?? 0}
+                badgeText="KELUAR"
+                subtitle="Pengeluaran barang tercatat pada periode"
+                icon={<OutboundIcon className="h-5 w-5" />}
+                variant="outbound"
+                isLoading={isLoading && !summary}
+              />
+            </div>
           </div>
         </section>
 
-        {/* Aksi Cepat Terpisah Berdasarkan Role */}
+        {/* Aksi Cepat Berdasarkan Role */}
         <section
           aria-labelledby="aksi-cepat-heading"
           className="rounded-2xl border border-slate-200 bg-white p-5 shadow-2xs sm:p-6"
@@ -208,11 +376,8 @@ export default function DashboardPage() {
             id="aksi-cepat-heading"
             className="text-base font-bold text-slate-900"
           >
-            Akses Cepat {isAdmin ? "Staf Administrasi & Operasional" : "Petugas Store / Security"}
+            Akses Cepat {isAdmin ? "Admin & Operasional" : "Petugas Store / Security"}
           </h2>
-          <p className="mt-1 text-xs text-slate-500 sm:text-sm">
-            Navigasi dan tombol aksi otomatis menyesuaikan hak akses akun Anda.
-          </p>
 
           <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <Link
@@ -279,16 +444,27 @@ export default function DashboardPage() {
           </div>
 
           {isAdmin && (
-            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
               <Link
                 href="/users"
                 className="flex items-center justify-between rounded-xl border border-slate-200 px-4 py-3 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
               >
                 <span className="flex items-center gap-2.5">
                   <UsersIcon className="h-4.5 w-4.5 text-indigo-600" />
-                  Manajemen Akun Pengguna
+                  Manajemen Akun
                 </span>
-                <span className="text-xs text-indigo-600">Khusus Admin →</span>
+                <span className="text-xs text-indigo-600">Kelola →</span>
+              </Link>
+
+              <Link
+                href="/work-types"
+                className="flex items-center justify-between rounded-xl border border-slate-200 px-4 py-3 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
+              >
+                <span className="flex items-center gap-2.5">
+                  <WorkTypeIcon className="h-4.5 w-4.5 text-indigo-600" />
+                  Jenis Pekerjaan
+                </span>
+                <span className="text-xs text-indigo-600">Kelola →</span>
               </Link>
 
               <Link
@@ -297,186 +473,56 @@ export default function DashboardPage() {
               >
                 <span className="flex items-center gap-2.5">
                   <AuditIcon className="h-4.5 w-4.5 text-indigo-600" />
-                  Tinjau Log Audit Transaksi
+                  Log Audit
                 </span>
-                <span className="text-xs text-indigo-600">Khusus Admin →</span>
+                <span className="text-xs text-indigo-600">Tinjau →</span>
               </Link>
             </div>
           )}
         </section>
 
-        {/* Pratinjau Komponen Tabel, Form Filter, Modal, Konfirmasi, Notifikasi, Loading & Empty State */}
-        <section
-          aria-labelledby="komponen-heading"
-          className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-2xs sm:p-6"
-        >
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        {/* 5 Transaksi Terbaru pada Periode Terpilih */}
+        <section className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <h2
-                id="komponen-heading"
-                className="text-base font-bold text-slate-900"
-              >
-                Status Kesiapan Modul &amp; Uji Komponen UI
+              <h2 className="text-base font-bold text-slate-900">
+                Transaksi Terbaru pada Periode
               </h2>
-              <p className="text-xs text-slate-500 sm:text-sm">
-                Demonstrasi komponen Tabel, Form, Modal, Konfirmasi, Notifikasi,
-                Loading State, dan Empty State.
+              <p className="text-xs text-slate-500">
+                Menampilkan maksimal 5 pencatatan terbaru untuk periode{" "}
+                {periodLabel}.
               </p>
             </div>
-
-            <div className="flex flex-wrap gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setTableLoading((prev) => !prev)}
-              >
-                {tableLoading ? "Matikan Loading" : "Simulasi Loading"}
+            <Link href="/transactions">
+              <Button type="button" variant="outline" size="sm">
+                Lihat Semua Riwayat →
               </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowEmptyDemo((prev) => !prev)}
-              >
-                {showEmptyDemo ? "Tampilkan Data" : "Simulasi Empty State"}
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => setPreviewModalOpen(true)}
-              >
-                Buka Modal
-              </Button>
-              <Button
-                variant="danger"
-                size="sm"
-                onClick={() => setConfirmOpen(true)}
-              >
-                Uji Konfirmasi
-              </Button>
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() =>
-                  toast.success(
-                    "Notifikasi Berhasil",
-                    "Komponen toast notifikasi siap digunakan.",
-                  )
-                }
-              >
-                Uji Notifikasi
-              </Button>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <TextInput
-              label="Pencarian Modul"
-              placeholder="Cari nama modul..."
-              value={searchFilter}
-              onChange={(e) => setSearchFilter(e.target.value)}
-            />
-            <SelectInput
-              label="Filter Hak Akses"
-              value={roleFilter}
-              onChange={(e) => setRoleFilter(e.target.value)}
-              options={[
-                { value: "all", label: "Semua Hak Akses" },
-                { value: "all_roles", label: "Admin & Petugas" },
-                { value: "admin", label: "Khusus Admin" },
-              ]}
-            />
+            </Link>
           </div>
 
           <DataTable
             columns={columns}
-            data={filteredRows}
+            data={recentTransactions}
             rowKey={(row) => row.id}
-            isLoading={tableLoading}
-            skeletonRows={4}
+            isLoading={isLoading}
+            skeletonRows={5}
+            onRowClick={(row) => setDetailTarget(row)}
             emptyState={{
-              title: "Data tidak ditemukan",
+              title: "Belum ada transaksi pada periode ini",
               description:
-                "Tidak ada modul yang cocok dengan filter aktif atau sedang dalam simulasi kosong.",
-              action: (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setShowEmptyDemo(false);
-                    setSearchFilter("");
-                    setRoleFilter("all");
-                  }}
-                >
-                  Reset Filter
-                </Button>
-              ),
+                dateFrom || dateTo
+                  ? "Tidak ada pencatatan pada rentang tanggal yang dipilih."
+                  : "Mulai catat barang masuk atau barang keluar untuk melihat ringkasan di dashboard.",
             }}
-            footer={
-              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
-                <span>Menampilkan {filteredRows.length} komponen modul</span>
-                <span>Role aktif: {user.role_label}</span>
-              </div>
-            }
           />
         </section>
       </div>
 
-      {/* Modal Detail UI Foundation */}
-      <Modal
-        open={previewModalOpen}
-        onClose={() => setPreviewModalOpen(false)}
-        title="Pratinjau Komponen Modal"
-        description="Modal ini dibangun menggunakan elemen HTML <dialog> native dengan aksesibilitas penuh dan pencegahan scroll halaman di belakang."
-        footer={
-          <>
-            <Button
-              variant="outline"
-              onClick={() => setPreviewModalOpen(false)}
-            >
-              Tutup
-            </Button>
-            <Button
-              variant="primary"
-              onClick={() => {
-                setPreviewModalOpen(false);
-                toast.info("Modal ditutup", "Aksi modal berhasil dijalankan.");
-              }}
-            >
-              Simpan Contoh
-            </Button>
-          </>
-        }
-      >
-        <div className="space-y-3 text-sm text-slate-600">
-          <p>
-            Komponen modal mendukung tombol <kbd className="rounded bg-slate-100 px-1.5 py-0.5 text-xs font-semibold">Esc</kbd>,
-            klik di luar dialog, serta manajemen fokus otomatis.
-          </p>
-          <TextInput
-            label="Contoh Field Read-Only (Otomatis dari Akun Login)"
-            value={`${user.name} (@${user.username})`}
-            readOnly
-            helperText="Sesuai PRD Bagian 8.1/8.2: nama penerima/pemberi diambil otomatis dan tidak dapat diubah Petugas."
-          />
-        </div>
-      </Modal>
-
-      {/* Dialog Konfirmasi */}
-      <ConfirmDialog
-        open={confirmOpen}
-        onCancel={() => setConfirmOpen(false)}
-        onConfirm={() => {
-          setConfirmOpen(false);
-          toast.warning(
-            "Konfirmasi Diterima",
-            "Contoh dialog konfirmasi telah dikonfirmasi.",
-          );
-        }}
-        title="Konfirmasi Tindakan Penting"
-        description="Dialog ini akan digunakan untuk konfirmasi penghapusan (soft delete), penonaktifan akun, atau logout."
-        confirmLabel="Ya, Konfirmasi"
-        cancelLabel="Batal"
-        variant="danger"
+      <TransactionDetailModal
+        open={detailTarget !== null}
+        transaction={detailTarget}
+        isAdmin={isAdmin}
+        onClose={() => setDetailTarget(null)}
       />
     </DashboardShell>
   );

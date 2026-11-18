@@ -20,6 +20,10 @@ return Application::configure(basePath: dirname(__DIR__))
         // Sanctum SPA (cookie-based): request dari stateful domain memakai session + CSRF.
         $middleware->statefulApi();
 
+        // API tidak memiliki halaman login Blade: lempar AuthenticationException menjadi JSON 401
+        // tanpa memanggil route('login') yang menyebabkan RouteNotFoundException pada request non-JSON.
+        $middleware->redirectGuestsTo(fn (Request $request) => null);
+
         // Alias middleware otorisasi role & validasi akun aktif (Tahap 3)
         $middleware->alias([
             'active' => EnsureUserIsActive::class,

@@ -18,6 +18,18 @@ class UserResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
+        $hasRelationCounts = isset($this->recorded_transactions_count)
+            || isset($this->created_transactions_count)
+            || isset($this->updated_transactions_count)
+            || isset($this->audit_logs_count);
+
+        $linkedRecordsCount = $hasRelationCounts
+            ? (int) ($this->recorded_transactions_count ?? 0)
+                + (int) ($this->created_transactions_count ?? 0)
+                + (int) ($this->updated_transactions_count ?? 0)
+                + (int) ($this->audit_logs_count ?? 0)
+            : null;
+
         return [
             'id' => $this->id,
             'name' => $this->name,
@@ -27,6 +39,8 @@ class UserResource extends JsonResource
             'role_label' => $this->roleLabel(),
             'is_active' => (bool) $this->is_active,
             'permissions' => $this->permissions(),
+            'linked_records_count' => $this->when($hasRelationCounts, $linkedRecordsCount),
+            'can_delete' => $this->when($hasRelationCounts, fn () => $linkedRecordsCount === 0 && $request->user()?->id !== $this->id),
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),
         ];

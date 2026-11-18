@@ -12,7 +12,14 @@ class TransactionPhoto extends Model
     use HasFactory;
 
     public const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB (PRD Bagian 6)
+    public const MAX_FILE_SIZE_KB = 5120;               // 5 MB dalam KB untuk rule validasi `max` Laravel
     public const MAX_PHOTOS_PER_TRANSACTION = 3;        // Maks 3 foto (PRD Bagian 6)
+    public const ALLOWED_EXTENSIONS = [
+        'jpg',
+        'jpeg',
+        'png',
+        'webp',
+    ];
     public const ALLOWED_MIME_TYPES = [
         'image/jpeg',
         'image/png',
